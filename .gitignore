@@ -1,0 +1,8 @@
+.env
+.venv
+__pycache__
+*.pyc
+data/uploads/
+data/*.faiss
+data/*.pkl
+.idea/
