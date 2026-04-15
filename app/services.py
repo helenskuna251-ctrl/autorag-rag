@@ -6,207 +6,162 @@ import pickle
 import logging
 from dotenv import load_dotenv
 import os
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# 指定 .env 文件路径
-env_path = os.path.join(BASE_DIR, ".env")
-
-# 加载 .env
-load_dotenv(env_path)
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
 handler = logging.StreamHandler()
-handler.setLevel(logging.INFO)
-
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-
+handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 if not logger.handlers:
     logger.addHandler(handler)
 
-from sentence_transformers import CrossEncoder
+# ---------- 模型加载 ----------
+from sentence_transformers import SentenceTransformer, CrossEncoder
+model = SentenceTransformer('BAAI/bge-small-zh')
 reranker = CrossEncoder("BAAI/bge-reranker-base")
+
+
+# ---------- PDF 解析 ----------
 def read_txt(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
-        text = f.read()
-    return text
-def read_pdf(filepath):
+        return f.read()
+
+def read_pdf(filepath, skip_pages=3):
+    """读取 PDF,跳过前 N 页(封面+目录污染区,默认3)"""
     doc = fitz.open(filepath)
-
-    text=""
-
-    for page in doc:
+    text = ""
+    for i, page in enumerate(doc):
+        if i < skip_pages:
+            continue
         text += page.get_text()
     return text
 
-
-def parse_file(filepath):
-    logger.info(f"开始解析文件：{filepath}")
-    _,ext = os.path.splitext(filepath)
+def parse_file(filepath, skip_pages=3):
+    logger.info(f"开始解析文件:{filepath}")
+    _, ext = os.path.splitext(filepath)
     if ext == '.txt':
         return read_txt(filepath)
     elif ext == '.pdf':
-        return read_pdf(filepath)
+        return read_pdf(filepath, skip_pages=skip_pages)
     else:
-        logger.error(f"不支持的文件类型：{ext}")
-        raise ValueError('Unsupported file type')
-
-def chunk_text_parent_child(text):
-
-    lines = text.split("\n")
-
-    parent_chunks = []
-    child_chunks = []
-    child_to_parent = {}
-    current_parent = ""
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+        raise ValueError(f'Unsupported file type: {ext}')
 
 
-        is_title = (
-                len(line) < 25 and  # 更短
-                not line.startswith('●') and
-                not line.startswith('注') and
-                not line[-1] in ['。', '，', '、', '；', '：'] and  # 不以标点结尾
-                (re.match(r'^[\d一二三四五六七八九十]+[\.、]', line) or  # 数字/中文数字开头
-                 re.match(r'^第.+[章节]', line))  # 或者"第X章/节"格式
-        )
+# ---------- Chunk 切分(新版,RecursiveCharacterTextSplitter) ----------
+def chunk_text(text, chunk_size=500, chunk_overlap=80):
+    """
+    用 LangChain 的 RecursiveCharacterTextSplitter 切分
+    优先在段落/换行/句号/逗号处切,极少从句中断
+    """
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", "。", "!", "?", ";", ",", " ", ""],
+        length_function=len,  # 按字符数计算长度,中文友好
+    )
+    chunks = splitter.split_text(text)
+    logger.info(f"切分完成,共 {len(chunks)} 个 chunks")
+    return chunks
 
-        if is_title and current_parent :
-            parent_chunks.append(current_parent.strip())
-            current_parent_idx = len(parent_chunks) - 1
-            current_parent = line + "\n"
 
-        elif is_title:
-            current_parent = line + "\n"
-        else:
-            current_parent += line + "\n"
-
-            child_idx = len(child_chunks)
-            child_chunks.append(line)
-            child_to_parent[child_idx] = max(0,len(parent_chunks))
-
-    if current_parent :
-        parent_chunks.append(current_parent.strip())
-
-    return parent_chunks,child_chunks,child_to_parent
-
-from sentence_transformers import SentenceTransformer
-model=SentenceTransformer('BAAI/bge-small-zh')
-
+# ---------- Embedding 与索引 ----------
 def create_embeddings(chunks):
-    embeddings = model.encode(chunks)
-    embeddings = np.array(embeddings).astype("float32")
-    return embeddings
+    embeddings = model.encode(chunks, normalize_embeddings=True)
+    return np.array(embeddings).astype("float32")
 
 def build_faiss_index(embeddings):
-    logger.info(f"开始构建索引，向量数量：{len(embeddings)}")
-    dimnsion=embeddings.shape[1]
-    index = (faiss.IndexFlatL2(dimnsion))
+    logger.info(f"开始构建索引,向量数量:{len(embeddings)}")
+    dim = embeddings.shape[1]
+    index = faiss.IndexFlatIP(dim)  # 改用内积(IP),配合 normalize_embeddings 等价余弦相似度
     index.add(embeddings)
     logger.info("索引构建完成")
     return index
 
-def search_chunks(question,index,child_chunks,parent_chunks,child_to_parent,top_k:10):
-    question_vector = model.encode([question])
+
+# ---------- 检索(简化版,无父子结构) ----------
+def search_chunks(question, index, chunks, top_k=10):
+    """
+    向量检索,返回 top_k 个最相关的 chunk
+    简化:不再有父子结构,直接返回 chunk 文本列表
+    """
+    question_vector = model.encode([question], normalize_embeddings=True)
+    question_vector = np.array(question_vector).astype("float32")
     distances, indices = index.search(question_vector, top_k)
     results = []
-    seen_parents = set()
     for i in indices[0]:
-        if i <len(child_chunks):
-            parent_idx = child_to_parent.get(i,0)
-            if parent_idx not in seen_parents:
-                seen_parents.add(parent_idx)
-                results.append(parent_chunks[parent_idx])
+        if 0 <= i < len(chunks):
+            results.append(chunks[int(i)])
     return results
 
+
+# ---------- Reranker ----------
+def rerank_chunks(query, chunks, top_k=3):
+    if not chunks:
+        return []
+    pairs = [(query, c) for c in chunks]
+    scores = reranker.predict(pairs)
+    ranked = sorted(zip(chunks, scores), key=lambda x: x[1], reverse=True)
+    return [c for c, s in ranked[:top_k]]
+
+
+# ---------- GLM-4 答题 ----------
 api_key = os.getenv("ZHIPU_API_KEY")
 if not api_key:
-    raise ValueError("ZHIPU_API_KEY 未找到，请检查 .env 文件")
-print("读取到API_KEY:", api_key[:10], "...")
+    raise ValueError("ZHIPU_API_KEY 未找到")
 
 from zhipuai import ZhipuAI
 client = ZhipuAI(api_key=api_key)
-def generate_answer_stream(question,chunks):
+
+def generate_answer_stream(question, chunks):
     context = "\n\n".join(chunks)
     prompt = f"""你是一名专业的汽车售后工程师。
-    请根据以下参考资料回答用户问题，回答要简洁准确，使用中文回答。
-    如果资料中没有相关信息，请直接说明无法从资料中找到答案。
-    
-    参考资料:
-    {context}
-    
-    用户回答问题:{question}
+请根据以下参考资料回答用户问题,回答要简洁准确,使用中文回答。
+如果资料中没有相关信息,请直接说明无法从资料中找到答案。
 
+参考资料:
+{context}
 
-    回答:"""
+用户问题:{question}
 
+回答:"""
     response = client.chat.completions.create(
         model="glm-4",
         messages=[{"role": "user", "content": prompt}],
         stream=True
     )
-
     for chunk in response:
         content = chunk.choices[0].delta.content
         if content:
             yield content
 
 def clen_answer(text):
-    text = re.sub(r"\*+","",text)
-    text = re.sub(r"\n+","\n",text)
-    text = re.sub(r"\s+"," ",text)
-    text = text.strip()
-    return text
+    text = re.sub(r"\*+", "", text)
+    text = re.sub(r"\n+", "\n", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
-def rerank_chunks(query,chunks,top_k=3):
-    """
-    使用 reranker 对检索到的 chunks 重新排序。
 
-    参数:
-        query (str): 用户问题
-        chunks (list): vector search 返回的文本
-        top_k (int): 最终返回的 chunk 数量
-
-    返回:
-        list: rerank 后的最相关 chunks
-    """
-    pairs = [(query,chunk) for chunk in chunks]
-    scores = reranker.predict(pairs)
-    ranked = sorted(zip(chunks,scores),key=lambda x:x[1],reverse=True)
-    reranked_chunks = [chunk for chunk,score in ranked[:top_k]]
-    return reranked_chunks
-
-INDEX_PATH = 'data/faiss_index.index'
-def save_index(index,child_chunks,parent_chunks,child_to_parent,car_model):
-    logger.info("开始保存索引到磁盘")
+# ---------- 索引保存/加载(简化版) ----------
+def save_index(index, chunks, car_model):
+    """保存索引和 chunks,按 car_model 分桶"""
+    if not car_model or car_model == "general":
+        raise ValueError("car_model 必须显式指定(m9ev/m8/s800evr 等),不允许 'general' 默认值")
+    logger.info(f"保存索引到磁盘,car_model={car_model}")
     faiss.write_index(index, f"data/{car_model}_index.faiss")
-
-    with open(f"data/{car_model}_chunks.pkl","wb") as f:
-        pickle.dump({
-            "child_chunks":child_chunks,
-            "parent_chunks":parent_chunks,
-            "child_to_parent":child_to_parent,
-        },f)
-    logger.info(f"索引保存完成，共{len(child_chunks)}个子chunk,{len(parent_chunks)}个父chunk")
+    with open(f"data/{car_model}_chunks.pkl", "wb") as f:
+        pickle.dump({"chunks": chunks}, f)
+    logger.info(f"索引保存完成,共 {len(chunks)} 个 chunks")
 
 def load_index(car_model):
+    """加载指定车型的索引"""
     index_path = f"data/{car_model}_index.faiss"
     chunks_path = f"data/{car_model}_chunks.pkl"
     if not os.path.exists(index_path) or not os.path.exists(chunks_path):
-        return None,[],[],{}
+        return None, []
     index = faiss.read_index(index_path)
-    with open(chunks_path,"rb") as f:
+    with open(chunks_path, "rb") as f:
         data = pickle.load(f)
-        child_chunks = data["child_chunks"]
-        parent_chunks = data["parent_chunks"]
-        child_to_parent = data["child_to_parent"]
-        return index,child_chunks,parent_chunks,child_to_parent
-
-
-
+    return index, data["chunks"]

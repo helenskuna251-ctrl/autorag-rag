@@ -1,8 +1,27 @@
-.env
-.venv
-__pycache__
-*.pyc
-data/uploads/
-data/*.faiss
-data/*.pkl
+# ============ 虚拟环境 / IDE ============
+.venv/
 .idea/
+.vscode/
+
+# ============ Python 缓存 ============
+__pycache__/
+*.pyc
+
+# ============ 敏感信息 ============
+.env
+*.env
+
+# ============ 大文件 / 缓存 ============
+*.faiss
+*.pkl
+data/uploads/
+evals/kg_cache_*.json
+evals/*_full.json
+
+# ============ 运行产物 ============
+reports/
+*.log
+
+# ============ 备份 / 临时 ============
+*.bak
+*.tmp

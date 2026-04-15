@@ -1,90 +1,87 @@
-from app.services import parse_file
-from fastapi import APIRouter
-from fastapi import UploadFile
-from fastapi import File
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
-from app.services import generate_answer_stream
+from pydantic import BaseModel
 import os
+import traceback
+
 from app.services import (
     parse_file,
-    chunk_text_parent_child,
+    chunk_text,
     create_embeddings,
     build_faiss_index,
     search_chunks,
     save_index,
-    rerank_chunks
+    load_index,
+    rerank_chunks,
+    generate_answer_stream,
 )
-import  traceback
-indexes = {}
-from app.services import load_index
 
-
-router =APIRouter()
+router = APIRouter()
+indexes = {}  # 内存缓存
 
 UPLOAD_DIR = "data/uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)###文件保存路径
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-import traceback
+# 允许的车型白名单(防止前端瞎传)
+ALLOWED_CAR_MODELS = {"m9ev", "m8", "s800evr"}
+
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...), car_model: str = "general"):
+async def upload_file(file: UploadFile = File(...), car_model: str = None):
+    """上传 PDF 并构建索引,car_model 必填"""
+    if not car_model or car_model not in ALLOWED_CAR_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"car_model 必填且必须在 {ALLOWED_CAR_MODELS} 中"
+        )
     try:
-        print("UPLOAD API 被调用了")
         filepath = os.path.join(UPLOAD_DIR, file.filename)
-
         with open(filepath, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            f.write(await file.read())
 
         text = parse_file(filepath)
-        parent_chunks,child_chunks,child_to_parent = chunk_text_parent_child(text)
-        embeddings = create_embeddings(child_chunks)
+        chunks = chunk_text(text)
+        embeddings = create_embeddings(chunks)
         vector_index = build_faiss_index(embeddings)
-        save_index(vector_index,child_chunks ,parent_chunks,child_to_parent, car_model)
-        indexes[car_model] = (vector_index,child_chunks,parent_chunks,child_to_parent)
+        save_index(vector_index, chunks, car_model)
+        indexes[car_model] = (vector_index, chunks)
 
         return {
             "filename": file.filename,
+            "car_model": car_model,
             "status": "index built",
-            "child_chunks": len(child_chunks),
-            "parent_chunks": len(parent_chunks)
+            "chunks": len(chunks),
         }
-
     except Exception as e:
-        import traceback
         traceback.print_exc()
-        print(f"上传出错了: {e}")
-        raise
+        raise HTTPException(status_code=500, detail=str(e))
 
-from pydantic import BaseModel
-class  QueryRequest(BaseModel):
+
+class QueryRequest(BaseModel):
     query: str
 
-@router.post("/query/stream")
-async def query_stream(query: QueryRequest, car_model: str = "general"):
-    if car_model in indexes:
-        vector_index, child_chunks, parent_chunks, child_to_parent = indexes[car_model]
-    else:
-        vector_index, child_chunks, parent_chunks, child_to_parent = load_index(car_model)
-        if vector_index is None:
-            return {"error": f"没有找到{car_model}的索引，请先上传文档"}
-        indexes[car_model] = (vector_index, child_chunks, parent_chunks, child_to_parent)
 
-    results = search_chunks(
-        query.query,
-        vector_index,
-        child_chunks,
-        parent_chunks,
-        child_to_parent,
-        top_k=10
-    )
+@router.post("/query/stream")
+async def query_stream(query: QueryRequest, car_model: str = None):
+    """流式查询,car_model 必填"""
+    if not car_model or car_model not in ALLOWED_CAR_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"car_model 必填且必须在 {ALLOWED_CAR_MODELS} 中"
+        )
+
+    if car_model in indexes:
+        vector_index, chunks = indexes[car_model]
+    else:
+        vector_index, chunks = load_index(car_model)
+        if vector_index is None:
+            raise HTTPException(404, f"未找到 {car_model} 的索引,请先上传")
+        indexes[car_model] = (vector_index, chunks)
+
+    results = search_chunks(query.query, vector_index, chunks, top_k=10)
     results = rerank_chunks(query.query, results, top_k=3)
 
     return StreamingResponse(
         generate_answer_stream(query.query, results),
         media_type="text/plain"
     )
-
-
-
-
