@@ -1,0 +1,110 @@
+[
+  {
+    "user_input": "我的车开了快一万公里了,该去换机油了吗?机油滤清器要一起换吗?",
+    "reference_contexts": [],
+    "reference": "m9ev 为纯电车型,不配备燃油发动机,因此无需更换机油或机油滤清器。机油保养仅适用于增程版车型(如 s800evr)。建议您参考纯电车型的保养项目,主要包括电池冷却液、制动液等。",
+    "synthesizer_name": "manual_trap",
+    "should_refuse": true,
+    "target_model": "m9ev",
+    "hop_type": "trap_cross_model",
+    "design_note": "m9ev 纯电车无发动机,测模型是否会被'一万公里保养'的常识带偏瞎编"
+  },
+  {
+    "user_input": "4S 店说我的车开 4 年了建议换火花塞,这个必须换吗?",
+    "reference_contexts": [],
+    "reference": "m9ev 为纯电车型,不配备内燃机,因此没有火花塞。火花塞更换(4 年或 6 万公里)仅适用于增程版车型。如果 4S 店对纯电车型提出此建议,属于错误信息,您可以拒绝。",
+    "synthesizer_name": "manual_trap",
+    "should_refuse": true,
+    "target_model": "m9ev",
+    "hop_type": "trap_cross_model",
+    "design_note": "测模型是否会被 4S 店话术带偏,高仿真用户场景"
+  },
+  {
+    "user_input": "最近闻到车里有汽油味,会不会是燃油管接头漏气?需要立刻去维修吗?",
+    "reference_contexts": [],
+    "reference": "m8 为纯电车型,不配备燃油系统,因此不会出现汽油味或燃油管接头漏气的情况。如果您闻到异味,建议检查空调系统、内饰材料或外部环境因素,并尽快联系售后服务确认。",
+    "synthesizer_name": "manual_trap",
+    "should_refuse": true,
+    "target_model": "m8",
+    "hop_type": "trap_cross_model",
+    "design_note": "高仿真用户场景,测纯电车对燃油系统相关问题的拒答能力"
+  },
+  {
+    "user_input": "我的排气管有异响",
+    "reference_contexts": [],
+    "reference": "m9ev 为纯电车型,不配备内燃机和排气系统,因此不存在排气管。您描述的异响可能来自底盘、电机、悬挂等其他部件,建议联系售后服务进行检查。",
+    "synthesizer_name": "manual_trap",
+    "should_refuse": true,
+    "target_model": "m9ev",
+    "hop_type": "trap_cross_model",
+    "design_note": "真实用户表达方式(短、直接),测纯电车对'排气系统'相关问题的拒答"
+  },
+  {
+    "user_input": "我这车是不是只能充电不能加油?高速路上充电桩不好找怎么办?",
+    "reference_contexts": [],
+    "reference": "s800evr 为增程版车型,既可以充电也可以加油。当电量不足时,增程器(发动机)会启动为电池充电。高速路上如果找不到充电桩,可以选择加油站加油,由增程器持续提供动力。",
+    "synthesizer_name": "manual_trap",
+    "should_refuse": false,
+    "target_model": "s800evr",
+    "hop_type": "trap_reverse",
+    "design_note": "反向陷阱:用户误以为增程车只能充电,测模型能否澄清增程架构"
+  },
+  {
+    "user_input": "我开 ACC 跟车时,如果走神了系统会提醒我吗?",
+    "reference_contexts": [],
+    "reference": "ACC 自适应巡航为辅助驾驶功能,不能取代驾驶员的专注驾驶。m9ev 配备疲劳分神监测功能,通过车内摄像头识别驾驶员状态,当检测到疲劳或分神时会发出提示。使用 ACC 时,驾驶员应始终手握方向盘、保持警惕,必要时及时人工干预。",
+    "synthesizer_name": "manual_multihop",
+    "should_refuse": false,
+    "target_model": "m9ev",
+    "hop_type": "multihop_2",
+    "source_chapters": [
+      "ACC 自适应巡航",
+      "疲劳分神监测"
+    ],
+    "design_note": "2-hop 依赖式多跳:先知道 ACC 需要驾驶员监督,再串联疲劳监测功能"
+  },
+  {
+    "user_input": "自动泊车的时候,如果后方突然来了个行人我没注意到,车会自动刹停吗?",
+    "reference_contexts": [],
+    "reference": "m9ev 在自动泊车(车位到车位 2.0)过程中,配合主动安全辅助中的后向安全功能,可以检测后方障碍物和行人。当识别到碰撞风险时,系统会发出警告并可触发紧急制动(AEB)。但驾驶员仍应保持监督,必要时主动干预。",
+    "synthesizer_name": "manual_multihop",
+    "should_refuse": false,
+    "target_model": "m9ev",
+    "hop_type": "multihop_2",
+    "source_chapters": [
+      "车位到车位 2.0",
+      "主动安全辅助-后向安全"
+    ],
+    "design_note": "2-hop 依赖式多跳:测'泊车+主动安全'的协同"
+  },
+  {
+    "user_input": "那个灯,亮红色的,在仪表盘上,啥意思?",
+    "reference_contexts": [],
+    "reference": "您描述的信息较为模糊,仪表盘上的红色指示灯可能代表多种含义,例如:制动系统警告、安全气囊故障、发动机故障(若适用)、机油压力异常等。建议您查看仪表盘上该指示灯的具体图标,或参考用户手册中的仪表显示屏章节,也可以联系售后服务确认。",
+    "synthesizer_name": "manual_boundary",
+    "should_refuse": false,
+    "target_model": "m9ev",
+    "hop_type": "boundary_ambiguous",
+    "design_note": "指代不清+口语化,测模型能否反问或给通用提示"
+  },
+  {
+    "user_input": "开自动驾驶,在高速上可以帮我超车或者自由变道吗?",
+    "reference_contexts": [],
+    "reference": "m9ev 提供的是辅助驾驶(如 LCC 车道巡航、NCA 智驾领航),不是完全自动驾驶。在高速上:1)LCC/NCA 支持拨杆变道辅助,但需要驾驶员主动拨动转向拨杆触发,系统不会自主决策超车;2)变道过程中驾驶员需时刻手握方向盘、观察盲区和周围环境;3)驾驶员承担驾驶主体责任,不能完全依赖系统。请不要将辅助驾驶误解为无人驾驶。",
+    "synthesizer_name": "manual_boundary",
+    "should_refuse": false,
+    "target_model": "m9ev",
+    "hop_type": "capability_boundary",
+    "design_note": "能力边界题:测模型能否守住辅助驾驶的能力边界,不让用户误以为是 L4 自动驾驶"
+  },
+  {
+    "user_input": "自动家驶在高速上可以变道吗",
+    "reference_contexts": [],
+    "reference": "(推测您想问的是'自动驾驶'。)m9ev 提供辅助驾驶功能,在高速上 LCC/NCA 支持拨杆变道辅助,即驾驶员拨动转向拨杆后系统辅助完成变道。注意这是辅助而非自动,变道过程中驾驶员需手握方向盘并观察环境。",
+    "synthesizer_name": "manual_boundary",
+    "should_refuse": false,
+    "target_model": "m9ev",
+    "hop_type": "boundary_typo",
+    "design_note": "错别字(驾→家),测模型对不完美输入的鲁棒性"
+  }
+]
