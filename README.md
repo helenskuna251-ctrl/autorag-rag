@@ -39,28 +39,14 @@
 
 ## 三、系统架构
 
+**生产链路 (routes.py)**
 ```
-┌──────────────────────────────────────────────────────────┐
-│                  生产链路 (routes.py)                     │
-│                                                           │
-│   用户 query → FastAPI → 向量检索(FAISS)                 │
-│                            ↓                              │
-│                       Reranker(BGE-Reranker-base)        │
-│                            ↓                              │
-│                       GLM-4 流式生成                      │
-│                            ↓                              │
-│                       SSE 返回给用户                      │
-└──────────────────────────────────────────────────────────┘
+用户 query → FastAPI → 向量检索(FAISS) → Reranker(BGE-Reranker-base) → GLM-4 流式生成 → SSE 返回
+```
 
-┌──────────────────────────────────────────────────────────┐
-│                评测链路 (evals/run_all.py)                │
-│                                                           │
-│   testset → 向量检索 → Reranker → GLM-4 生成 → Ragas 4指标│
-│                                        ↓                  │
-│                                 Refusal Accuracy         │
-│                                        ↓                  │
-│                               题级 CSV + 汇总 stdout     │
-└──────────────────────────────────────────────────────────┘
+**评测链路 (evals/run_all.py)**
+```
+testset → 向量检索 → Reranker → GLM-4 生成 → Ragas 4指标 + Refusal Accuracy → 题级CSV + 汇总stdout
 ```
 
 ---
